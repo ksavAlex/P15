@@ -706,14 +706,45 @@ def showdown_value(s):
     """Terminal evaluator for showdown states."""
     return terminal_value(s, 0)  # simplified for hero
 
+# ===================== BLUEPRINT LOADING =====================
+_BP_CACHE = None
+
+def load_blueprint(path):
+    """
+    Загружает blueprint.json один раз и кеширует.
+    Возвращает dict с ключами (infoset_key → {action: prob}).
+    """
+    global _BP_CACHE
+    if _BP_CACHE is None or _BP_CACHE.get("_path") != path:
+        with open(path, "r") as f:
+            data = json.load(f)
+        _BP_CACHE = {"_path": path, "data": data}
+    return _BP_CACHE["data"]
+
 def get_blueprint_sigma(blueprint_path, state, player):
-    """Get blueprint policy for state/player."""
-    # This should return dict(action->probability) from blueprint
-    # For now, return uniform over legal actions as fallback
-    legal = legal_actions(state)
+    """
+    Возвращает распределение действий для игрока из блюпринта.
+    Если инфосет не найден — равномерное распределение.
+    """
+    legal = list(legal_actions(state))
     if not legal:
         return {}
-    return {a: 1.0/len(legal) for a in legal}
+    try:
+        bp = load_blueprint(blueprint_path) if blueprint_path else {}
+        key = policy_key(state, player)  # твоя функция генерации ключа
+        raw = bp.get(key, None)
+        if isinstance(raw, dict):
+            # нормализуем только по легальным действиям
+            probs = [max(0.0, float(raw.get(str(a), raw.get(a, 0.0)))) for a in legal]
+            z = sum(probs)
+            if z > 1e-12:
+                return {a: p/z for a, p in zip(legal, probs)}
+    except Exception as e:
+        print(f"[WARN] blueprint lookup failed: {e}")
+    # fallback — равномерное распределение
+    u = 1.0 / len(legal)
+    return {a: u for a in legal}
+# ==============================================================
 
 def opponent_policy(args, state, player):
     """Get policy for opponent players (baseline or blueprint)."""
