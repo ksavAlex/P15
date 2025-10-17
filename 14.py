@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Hydra6 (single-file, functional, no OOP) — 6-max NLHE bot:
+Poker1 (single-file, functional, no OOP) — 6-max NLHE bot:
 - External-Sampling MCCFR blueprint
 - Depth-limited online resolve with optional value net leaves
 - Pro-style bet ladders with pruning cap
@@ -708,6 +708,8 @@ def showdown_value(s):
 
 # ===================== BLUEPRINT LOADING =====================
 _BP_CACHE = None
+_BP_HITS   = 0
+_BP_MISSES = 0
 
 def load_blueprint(path):
     """
@@ -722,27 +724,24 @@ def load_blueprint(path):
     return _BP_CACHE["data"]
 
 def get_blueprint_sigma(blueprint_path, state, player):
-    """
-    Возвращает распределение действий для игрока из блюпринта.
-    Если инфосет не найден — равномерное распределение.
-    """
+    global _BP_HITS, _BP_MISSES
     legal = list(legal_actions(state))
     if not legal:
         return {}
     try:
         bp = load_blueprint(blueprint_path) if blueprint_path else {}
-        key = policy_key(state, player)  # твоя функция генерации ключа
+        key = policy_key(state, player)
         raw = bp.get(key, None)
         if isinstance(raw, dict):
-            # нормализуем только по легальным действиям
             probs = [max(0.0, float(raw.get(str(a), raw.get(a, 0.0)))) for a in legal]
             z = sum(probs)
             if z > 1e-12:
+                _BP_HITS += 1
                 return {a: p/z for a, p in zip(legal, probs)}
     except Exception as e:
         print(f"[WARN] blueprint lookup failed: {e}")
-    # fallback — равномерное распределение
-    u = 1.0 / len(legal)
+    _BP_MISSES += 1
+    u = 1.0/len(legal)
     return {a: u for a in legal}
 # ==============================================================
 
@@ -2379,6 +2378,13 @@ def cmd_evaluate(args):
     report_results(results, BIG_BLIND, "raw")
     if AIVAT_LITE_ENABLED and results_aivat:
         report_results(results_aivat, BIG_BLIND, "AIVAT-lite")
+    try:
+        from __main__ import _BP_HITS, _BP_MISSES
+        total = _BP_HITS + _BP_MISSES
+        if total:
+            print(f"[BP] lookup: hits={_BP_HITS} misses={_BP_MISSES} hit_rate={100.0*_BP_HITS/total:.1f}%")
+    except Exception:
+        pass
     return 0
 
 def cmd_smoke_test(args):
